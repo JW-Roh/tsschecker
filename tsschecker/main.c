@@ -45,6 +45,7 @@ static struct option longopts[] = {
     { "save",               no_argument,       NULL, 's' },
     { "latest",             no_argument,       NULL, 'l' },
     { "debug",              no_argument,       NULL, '0' },
+    { "all",                no_argument,       NULL, 'a' },
     { NULL, 0, NULL, 0 }
 };
 
@@ -74,6 +75,7 @@ void cmd_help(){
     printf("      --nocache \t\tignore caches and redownload required files\n");
     printf("      --print-tss-request\n");
     printf("      --print-tss-response\n");
+    printf("  -a, --all\t\t\tsave all signed shsh2 blobs (>= iOS 10)\n");
     printf("\n");
 }
 
@@ -147,6 +149,7 @@ char *parseNonce(const char *nonce){
 int main(int argc, const char * argv[]) {
     int err = 0;
     int isSigned = 0;
+    int save_all = 0;
     
     
     dbglog = 1;
@@ -171,7 +174,7 @@ int main(int argc, const char * argv[]) {
         cmd_help();
         return -1;
     }
-    while ((opt = getopt_long(argc, (char* const *)argv, "d:i:e:m:hslbo", longopts, &optindex)) > 0) {
+    while ((opt = getopt_long(argc, (char* const *)argv, "d:i:e:m:hslboa", longopts, &optindex)) > 0) {
         switch (opt) {
             case 'h': // long option: "help"; can be called as short option
                 cmd_help();
@@ -236,6 +239,10 @@ int main(int argc, const char * argv[]) {
                 break;
             case '9': // only long option: "sepnonce"
                 sepnonce = optarg;
+                break;
+            case 'a':
+                save_all = 1;
+                save_shshblobs = 1;
                 break;
                 
             default:
@@ -305,21 +312,41 @@ int main(int argc, const char * argv[]) {
         
         printListOfiOSForDevice(firmwareJson, firmwareTokens, device, versVals.isOta);
     }else{
-        //request ticket
-        if (buildmanifest) {
-            if (device && !checkDeviceExists(device, firmwareJson, firmwareTokens, versVals.isOta)) reterror(-4,"[TSSC] device %s could not be found in devicelist\n",device);
-            
-            isSigned = isManifestSignedForDevice(buildmanifest, &device, &devVals, &versVals);
-
-        }else{
-            if (!device) reterror(-3,"[TSSC] please specify a device for this option\n\tuse -h for more help\n");
-            if (!versVals.version) reterror(-5,"[TSSC] please specify an iOS version or buildID for this option\n\tuse -h for more help\n");
-            
-            isSigned = isVersionSignedForDevice(firmwareJson, firmwareTokens, versVals, device, devVals);
-        }
+        int versionsCnt;
+        char **versions = getListOfiOSForDevice(firmwareJson, firmwareTokens, device, versVals.isOta, &versionsCnt);
         
-        if (isSigned >=0) printf("\n%s %s for device %s %s being signed!\n",(versVals.isBuildid) ? "Build" : "iOS" ,versVals.version,device, (isSigned) ? "IS" : "IS NOT");
-        else putchar('\n'),error("[TSSC] checking tss status failed!\n");
+        for (int i=0; i<versionsCnt; i++) {
+            if (i){
+                int res = strcmp(versions[i-1], versions[i]);
+                free(versions[i-1]);
+                if (res == 0) continue;
+            }
+            
+            if (save_all) {
+                if (atoi(versions[i]) < 10) continue;
+                versVals.version = versions[i];
+            }
+            
+            if (save_all || strcmp(versVals.version, versions[i]) == 0) {
+                //request ticket
+                if (buildmanifest) {
+                    if (device && !checkDeviceExists(device, firmwareJson, firmwareTokens, versVals.isOta)) reterror(-4,"[TSSC] device %s could not be found in devicelist\n",device);
+                    
+                    isSigned = isManifestSignedForDevice(buildmanifest, &device, &devVals, &versVals);
+                    
+                }else{
+                    if (!device) reterror(-3,"[TSSC] please specify a device for this option\n\tuse -h for more help\n");
+                    if (!versVals.version) reterror(-5,"[TSSC] please specify an iOS version or buildID for this option\n\tuse -h for more help\n");
+                    
+                    isSigned = isVersionSignedForDevice(firmwareJson, firmwareTokens, versVals, device, devVals);
+                }
+                
+                if (isSigned >=0) printf("\n%s %s for device %s %s being signed!\n",(versVals.isBuildid) ? "Build" : "iOS" ,versVals.version,device, (isSigned) ? "IS" : "IS NOT");
+                else putchar('\n'),error("[TSSC] checking tss status failed!\n");
+            }
+        }
+        free(versions[versionsCnt-1]);
+        free(versions);
     }
     
     
